@@ -3,47 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LinkedIn Posts - Horizontal Data View</title>
-    <link rel="stylesheet" href="style.css">
+    <title>LinkedIn Posts Manager</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>📊 LinkedIn Posts Dashboard</h1>
-            <p class="subtitle">View and manage all your LinkedIn posts in horizontal layout</p>
-            
+        <h1>📝 LinkedIn Posts Manager</h1>
+        <p class="subtitle">Create and manage your LinkedIn content</p>
+
+        <!-- Create Post Form -->
+        <div class="form-section">
+            <h2>Create New Post</h2>
+            <form id="postForm">
+                <div class="form-group">
+                    <label for="post">Post Title</label>
+                    <input type="text" id="post" name="post" placeholder="Enter post title" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="image_prompt">Image Prompt</label>
+                    <input type="text" id="image_prompt" name="image_prompt" placeholder="Describe the image you want">
+                </div>
+
+                <div class="form-group">
+                    <label for="image_file">Upload Image (Optional)</label>
+                    <input type="file" id="image_file" name="image_file" accept="image/*">
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="action" name="action">
+                        <label for="action">Mark as Action Item</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="post_text">Post Content (Optional)</label>
+                    <textarea id="post_text" name="post_text" placeholder="Write your LinkedIn post content here..."></textarea>
+                </div>
+
+                <button type="submit" id="submitBtn">
+                    Submit Post
+                </button>
+            </form>
+
+            <div id="message" class="message"></div>
+        </div>
+
+        <!-- View Posts Section -->
+        <div class="view-section">
+            <div class="section-header">
+                <h2>📊 Your Posts</h2>
+                <button class="refresh-btn" id="refreshBtn">🔄 Refresh</button>
+            </div>
+
             <div class="controls">
                 <div class="search-box">
                     <input type="text" id="searchInput" placeholder="🔍 Search posts...">
                 </div>
                 <button class="filter-btn" id="actionFilter">Show Action Items Only</button>
-                <button class="filter-btn" id="refreshBtn">🔄 Refresh</button>
             </div>
-        </div>
 
-        <div class="stats" id="stats"></div>
+            <div class="stats" id="stats"></div>
 
-        <div id="errorMessage" class="error" style="display: none;"></div>
-        <div id="successMessage" class="success" style="display: none;"></div>
-        
-        <div id="loading" class="loading">Loading posts...</div>
-        
-        <div class="data-table" id="dataTable" style="display: none;">
-            <div class="table-header">
-                <div class="table-cell">ID</div>
-                <div class="table-cell">Post Title</div>
-                <div class="table-cell">Content</div>
-                <div class="table-cell">Image Prompt</div>
-                <div class="table-cell">Status</div>
-                <div class="table-cell">Actions</div>
+            <div id="errorMessage" class="error" style="display: none;"></div>
+            <div id="successMessage" class="success" style="display: none;"></div>
+            
+            <div id="loading" class="loading">Loading posts...</div>
+            
+            <div class="data-table" id="dataTable" style="display: none;">
+                <div class="table-header">
+                    <div class="table-cell">ID</div>
+                    <div class="table-cell">Post Title</div>
+                    <div class="table-cell">Content</div>
+                    <div class="table-cell">Image Prompt</div>
+                    <div class="table-cell">Status</div>
+                    <div class="table-cell">Actions</div>
+                </div>
+                <div id="tableBody"></div>
             </div>
-            <div id="tableBody"></div>
-        </div>
-        
-        <div id="noData" class="no-data" style="display: none;">
-            <h2>No posts found</h2>
-            <p>Create your first post to get started!</p>
+            
+            <div id="noData" class="no-data" style="display: none;">
+                <h2>No posts found</h2>
+                <p>Create your first post to get started!</p>
+            </div>
         </div>
     </div>
 
@@ -66,6 +110,98 @@
 
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+        // Form submission logic
+        const form = document.getElementById('postForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const messageDiv = document.getElementById('message');
+
+        function showMessage(text, type) {
+            messageDiv.textContent = text;
+            messageDiv.className = `message ${type}`;
+            messageDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting...';
+
+            let imageUrl = null;
+            let fileName = null;
+            let imageMetadata = null;
+            const imageFile = document.getElementById('image_file').files[0];
+
+            try {
+                // If there's a file to upload, upload it to Supabase Storage
+                if (imageFile) {
+                    submitBtn.textContent = 'Uploading image...';
+                    
+                    const fileExt = imageFile.name.split('.').pop();
+                    fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+                    const filePath = `${fileName}`;
+
+                    // Store image metadata
+                    imageMetadata = {
+                        original_name: imageFile.name,
+                        size: imageFile.size,
+                        type: imageFile.type,
+                        uploaded_at: new Date().toISOString()
+                    };
+
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('linkedin-post')
+                        .upload(filePath, imageFile);
+
+                    if (uploadError) throw uploadError;
+
+                    // Get the public URL
+                    const { data: { publicUrl } } = supabase.storage
+                        .from('linkedin-post')
+                        .getPublicUrl(filePath);
+
+                    imageUrl = publicUrl;
+                }
+
+                submitBtn.textContent = 'Saving post...';
+
+                const formData = {
+                    post: document.getElementById('post').value,
+                    image_prompt: document.getElementById('image_prompt').value || null,
+                    image: imageUrl,
+                    action: document.getElementById('action').checked,
+                    post_text: document.getElementById('post_text').value || null,
+                    image_metadata: imageMetadata,
+                    file_name: fileName,
+                    storage_bucket: imageUrl ? 'linkedin-post' : null
+                };
+
+                const { data, error } = await supabase
+                    .from('posts')
+                    .insert([formData])
+                    .select();
+
+                if (error) throw error;
+
+                showMessage('✅ Post submitted successfully!', 'success');
+                form.reset();
+                
+                // Refresh the posts list after successful submission
+                loadPosts();
+            } catch (err) {
+                console.error('Error:', err);
+                showMessage(`❌ Error: ${err.message}`, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Post';
+            }
+        });
+
+        // Posts viewing and management logic
         let allPosts = [];
         let filterAction = false;
         let currentEditId = null;
@@ -118,7 +254,6 @@
             const row = document.createElement('div');
             row.className = 'table-row';
             
-            // Truncate long text
             const postTitle = post.post || 'Untitled Post';
             const postText = post.post_text || 'No content';
             const imagePrompt = post.image_prompt || 'No prompt';
@@ -348,7 +483,7 @@
             document.getElementById('successMessage').style.display = 'none';
         }
 
-        // Event listeners
+        // Event listeners for posts section
         document.getElementById('searchInput').addEventListener('input', filterPosts);
 
         document.getElementById('actionFilter').addEventListener('click', function() {
@@ -367,6 +502,7 @@
             }
         });
 
+        // Load posts when page loads
         loadPosts();
     </script>
 </body>
