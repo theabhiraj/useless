@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Posts - Horizontal Data View</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 LinkedIn Posts Dashboard</h1>
+            <p class="subtitle">View and manage all your LinkedIn posts in horizontal layout</p>
+            
+            <div class="controls">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="🔍 Search posts...">
+                </div>
+                <button class="filter-btn" id="actionFilter">Show Action Items Only</button>
+                <button class="filter-btn" id="refreshBtn">🔄 Refresh</button>
+            </div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div id="errorMessage" class="error" style="display: none;"></div>
+        <div id="successMessage" class="success" style="display: none;"></div>
+        
+        <div id="loading" class="loading">Loading posts...</div>
+        
+        <div class="data-table" id="dataTable" style="display: none;">
+            <div class="table-header">
+                <div class="table-cell">ID</div>
+                <div class="table-cell">Post Title</div>
+                <div class="table-cell">Content</div>
+                <div class="table-cell">Image Prompt</div>
+                <div class="table-cell">Status</div>
+                <div class="table-cell">Actions</div>
+            </div>
+            <div id="tableBody"></div>
+        </div>
+        
+        <div id="noData" class="no-data" style="display: none;">
+            <h2>No posts found</h2>
+            <p>Create your first post to get started!</p>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="edit-modal" id="editModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Edit Post</h2>
+                <button class="close-modal" onclick="closeEditModal()">×</button>
+            </div>
+            <div id="modalContent">
+                <!-- Modal content will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://vavrdokjrfwuahovhozn.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZhdnJkb2tqcmZ3dWFob3Zob3puIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTYwNjU4NiwiZXhwIjoyMDc1MTgyNTg2fQ.KgBvEy3Z0ggL57Zur2L-ORjRIc0nYurzwCSLxd35NWA';
+
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let allPosts = [];
+        let filterAction = false;
+        let currentEditId = null;
+
+        async function loadPosts() {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('dataTable').style.display = 'none';
+                document.getElementById('noData').style.display = 'none';
+                hideMessages();
+
+                const { data, error } = await supabase
+                    .from('posts')
+                    .select('*')
+                    .order('id', { ascending: false });
+
+                if (error) throw error;
+
+                allPosts = data || [];
+                displayPosts(allPosts);
+                updateStats(allPosts);
+
+                document.getElementById('loading').style.display = 'none';
+            } catch (err) {
+                console.error('Error loading posts:', err);
+                document.getElementById('loading').style.display = 'none';
+                showError(`Error: ${err.message}`);
+            }
+        }
+
+        function displayPosts(posts) {
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = '';
+
+            if (posts.length === 0) {
+                document.getElementById('noData').style.display = 'block';
+                document.getElementById('dataTable').style.display = 'none';
+                return;
+            }
+
+            document.getElementById('dataTable').style.display = 'block';
+
+            posts.forEach(post => {
+                const row = createTableRow(post);
+                tableBody.appendChild(row);
+            });
+        }
+
+        function createTableRow(post) {
+            const row = document.createElement('div');
+            row.className = 'table-row';
+            
+            // Truncate long text
+            const postTitle = post.post || 'Untitled Post';
+            const postText = post.post_text || 'No content';
+            const imagePrompt = post.image_prompt || 'No prompt';
+
+            row.innerHTML = `
+                <div class="table-cell col-id">${post.id}</div>
+                <div class="table-cell col-post truncate" title="${postTitle}">${postTitle}</div>
+                <div class="table-cell col-text multi-line-truncate" title="${postText}">${postText}</div>
+                <div class="table-cell col-prompt multi-line-truncate" title="${imagePrompt}">${imagePrompt}</div>
+                <div class="table-cell col-status">
+                    ${post.action ? '<span class="action-badge">⚡ Action</span>' : '<span class="no-action">No Action</span>'}
+                    <br>
+                    ${post.image ? '<span class="has-image">📷 Has Image</span>' : '<span class="no-image">No Image</span>'}
+                </div>
+                <div class="table-cell col-actions">
+                    <button class="btn btn-edit" onclick="openEditModal(${post.id})">Edit</button>
+                    <button class="btn btn-delete" onclick="deletePost(${post.id})">Delete</button>
+                </div>
+            `;
+
+            return row;
+        }
+
+        function openEditModal(postId) {
+            const post = allPosts.find(p => p.id === postId);
+            if (!post) return;
+
+            currentEditId = postId;
+
+            const modalContent = document.getElementById('modalContent');
+            modalContent.innerHTML = `
+                <div class="edit-field">
+                    <label>Post Title</label>
+                    <input type="text" id="modal-post" value="${(post.post || '').replace(/"/g, '&quot;')}" placeholder="Enter post title">
+                </div>
+
+                <div class="edit-field">
+                    <label>Image Prompt</label>
+                    <input type="text" id="modal-prompt" value="${(post.image_prompt || '').replace(/"/g, '&quot;')}" placeholder="Describe the image">
+                </div>
+
+                <div class="edit-field">
+                    <label>Post Content</label>
+                    <textarea id="modal-text" placeholder="Write your post content...">${post.post_text || ''}</textarea>
+                </div>
+
+                <div class="edit-field">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="modal-action" ${post.action ? 'checked' : ''}>
+                        <span>Mark as Action Item</span>
+                    </label>
+                </div>
+
+                ${post.image ? `
+                    <div class="edit-field">
+                        <label>Current Image</label>
+                        <img src="${post.image}" alt="Current image" class="current-image" onerror="this.style.display='none'">
+                    </div>
+                ` : ''}
+
+                <div class="image-upload">
+                    <label>Upload New Image (Optional)</label>
+                    <input type="file" id="modal-image" accept="image/*">
+                </div>
+
+                <div class="modal-actions">
+                    <button class="btn btn-save" onclick="savePost()">💾 Save Changes</button>
+                    <button class="btn btn-cancel" onclick="closeEditModal()">✖️ Cancel</button>
+                </div>
+            `;
+
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').classList.remove('active');
+            currentEditId = null;
+        }
+
+        async function savePost() {
+            if (!currentEditId) return;
+
+            try {
+                hideMessages();
+                
+                const post = document.getElementById('modal-post').value;
+                const imagePrompt = document.getElementById('modal-prompt').value || null;
+                const postText = document.getElementById('modal-text').value || null;
+                const action = document.getElementById('modal-action').checked;
+                const imageFile = document.getElementById('modal-image').files[0];
+
+                let imageUrl = null;
+                let fileName = null;
+                let imageMetadata = null;
+
+                if (imageFile) {
+                    const fileExt = imageFile.name.split('.').pop();
+                    fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+                    const filePath = `${fileName}`;
+
+                    imageMetadata = {
+                        original_name: imageFile.name,
+                        size: imageFile.size,
+                        type: imageFile.type,
+                        uploaded_at: new Date().toISOString()
+                    };
+
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('linkedin-post')
+                        .upload(filePath, imageFile);
+
+                    if (uploadError) throw uploadError;
+
+                    const { data: { publicUrl } } = supabase.storage
+                        .from('linkedin-post')
+                        .getPublicUrl(filePath);
+
+                    imageUrl = publicUrl;
+                }
+
+                const updateData = {
+                    post: post,
+                    image_prompt: imagePrompt,
+                    post_text: postText,
+                    action: action
+                };
+
+                if (imageUrl) {
+                    updateData.image = imageUrl;
+                    updateData.file_name = fileName;
+                    updateData.image_metadata = imageMetadata;
+                    updateData.storage_bucket = 'linkedin-post';
+                }
+
+                const { data, error } = await supabase
+                    .from('posts')
+                    .update(updateData)
+                    .eq('id', currentEditId)
+                    .select();
+
+                if (error) throw error;
+
+                showSuccess('✅ Post updated successfully!');
+                closeEditModal();
+                loadPosts();
+            } catch (err) {
+                console.error('Error updating post:', err);
+                showError(`❌ Error: ${err.message}`);
+            }
+        }
+
+        async function deletePost(id) {
+            if (!confirm('Are you sure you want to delete this post?')) return;
+
+            try {
+                const { error } = await supabase
+                    .from('posts')
+                    .delete()
+                    .eq('id', id);
+
+                if (error) throw error;
+
+                showSuccess('✅ Post deleted successfully!');
+                loadPosts();
+            } catch (err) {
+                showError(`❌ Error deleting post: ${err.message}`);
+            }
+        }
+
+        function updateStats(posts) {
+            const totalPosts = posts.length;
+            const actionPosts = posts.filter(p => p.action).length;
+            const postsWithImages = posts.filter(p => p.image).length;
+
+            document.getElementById('stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${totalPosts}</div>
+                    <div class="stat-label">Total Posts</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${actionPosts}</div>
+                    <div class="stat-label">Action Items</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${postsWithImages}</div>
+                    <div class="stat-label">With Images</div>
+                </div>
+            `;
+        }
+
+        function filterPosts() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            
+            let filtered = allPosts;
+
+            if (filterAction) {
+                filtered = filtered.filter(p => p.action);
+            }
+
+            if (searchTerm) {
+                filtered = filtered.filter(p => 
+                    (p.post && p.post.toLowerCase().includes(searchTerm)) ||
+                    (p.post_text && p.post_text.toLowerCase().includes(searchTerm)) ||
+                    (p.image_prompt && p.image_prompt.toLowerCase().includes(searchTerm))
+                );
+            }
+
+            displayPosts(filtered);
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => errorDiv.style.display = 'none', 5000);
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            setTimeout(() => successDiv.style.display = 'none', 5000);
+        }
+
+        function hideMessages() {
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('successMessage').style.display = 'none';
+        }
+
+        // Event listeners
+        document.getElementById('searchInput').addEventListener('input', filterPosts);
+
+        document.getElementById('actionFilter').addEventListener('click', function() {
+            filterAction = !filterAction;
+            this.classList.toggle('active');
+            this.textContent = filterAction ? '✓ Action Items Filter' : 'Show Action Items Only';
+            filterPosts();
+        });
+
+        document.getElementById('refreshBtn').addEventListener('click', loadPosts);
+
+        // Close modal when clicking outside
+        document.getElementById('editModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeEditModal();
+            }
+        });
+
+        loadPosts();
+    </script>
+</body>
+</html>
